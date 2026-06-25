@@ -1,0 +1,37 @@
+{
+
+  "version": "2.0.0",
+
+  "tasks": [
+
+    {
+
+      "label": "Build current worksheet",
+
+      "type": "shell",
+
+      "command": "node",
+
+      "args": [
+
+        "${workspaceFolder}/scripts/build.js",
+
+        "${file}"
+
+      ],
+
+      "problemMatcher": [],
+
+      "group": {
+
+        "kind": "build",
+
+        "isDefault": true
+
+      }
+
+    }
+
+  ]
+
+}
