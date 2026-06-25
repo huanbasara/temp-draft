@@ -1,4 +1,3 @@
-
 const fs = require("fs");
 const path = require("path");
 const ts = require("typescript");
@@ -28,7 +27,6 @@ const worksheetAst = ts.createSourceFile(
 function getStatementTextWithoutExport(sourceText, sourceFile, statement) {
     const start = statement.getFullStart();
     const end = statement.end;
-
     const originalText = sourceText.substring(start, end);
 
     if (!statement.modifiers) {
@@ -52,9 +50,12 @@ function getStatementTextWithoutExport(sourceText, sourceFile, statement) {
     ).trimStart();
 }
 
-function getExportedStatementName(statement) {
+function getExportedStatementInfo(statement) {
     if (ts.isFunctionDeclaration(statement) && statement.name) {
-        return statement.name.text;
+        return {
+            name: statement.name.text,
+            type: "function"
+        };
     }
 
     if (ts.isVariableStatement(statement)) {
@@ -65,7 +66,10 @@ function getExportedStatementName(statement) {
         const declaration = statement.declarationList.declarations[0];
 
         if (ts.isIdentifier(declaration.name)) {
-            return declaration.name.text;
+            return {
+                name: declaration.name.text,
+                type: "const"
+            };
         }
     }
 
@@ -84,13 +88,16 @@ function extractExportedMember(importedFilePath, memberName) {
     );
 
     for (const statement of sourceFile.statements) {
-        const statementName = getExportedStatementName(statement);
+        const statementInfo = getExportedStatementInfo(statement);
 
-        if (statementName !== memberName) {
+        if (!statementInfo || statementInfo.name !== memberName) {
             continue;
         }
 
-        return getStatementTextWithoutExport(sourceText, sourceFile, statement);
+        return {
+            type: statementInfo.type,
+            text: getStatementTextWithoutExport(sourceText, sourceFile, statement)
+        };
     }
 
     throw new Error(`Cannot find exported member "${memberName}" in ${importedFilePath}`);
@@ -112,7 +119,8 @@ function parseNamedImports(importDeclaration) {
 
 const importDeclarations = worksheetAst.statements.filter(ts.isImportDeclaration);
 
-const expandedBlocks = [];
+const constBlocks = [];
+const functionBlocks = [];
 const importRanges = [];
 
 for (const importDeclaration of importDeclarations) {
@@ -128,7 +136,12 @@ for (const importDeclaration of importDeclarations) {
 
     for (const importedName of importedNames) {
         const block = extractExportedMember(importedFilePath, importedName);
-        expandedBlocks.push(block);
+
+        if (block.type === "const") {
+            constBlocks.push(block.text);
+        } else if (block.type === "function") {
+            functionBlocks.push(block.text);
+        }
     }
 
     importRanges.push({
@@ -145,8 +158,13 @@ for (const range of importRanges.sort((a, b) => b.start - a.start)) {
         worksheetWithoutImports.substring(range.end);
 }
 
+const expandedSource = [
+    ...constBlocks,
+    ...functionBlocks
+].join("\n\n");
+
 const outputSource =
-    expandedBlocks.join("\n\n") +
+    expandedSource +
     "\n\n" +
     worksheetWithoutImports.trimStart();
 
