@@ -10,9 +10,22 @@ if (!worksheetPathArg) {
 }
 
 const worksheetPath = path.resolve(worksheetPathArg);
+
+if (!fs.existsSync(worksheetPath)) {
+    console.error(`File not found: ${worksheetPath}`);
+    process.exit(1);
+}
+
+if (path.basename(worksheetPath).toLowerCase() !== "worksheet.js") {
+    console.error("The selected file must be named 'worksheet.js'.");
+    process.exit(1);
+}
+
 const worksheetDir = path.dirname(worksheetPath);
 const worksheetFileName = path.basename(worksheetPath, ".js");
 const outputPath = path.join(worksheetDir, `${worksheetFileName}.bundle.js`);
+
+console.log(`Building: ${worksheetPath}`);
 
 const worksheetSource = fs.readFileSync(worksheetPath, "utf8");
 
@@ -77,6 +90,10 @@ function getExportedStatementInfo(statement) {
 }
 
 function extractExportedMember(importedFilePath, memberName) {
+    if (!fs.existsSync(importedFilePath)) {
+        throw new Error(`Imported file not found: ${importedFilePath}`);
+    }
+
     const sourceText = fs.readFileSync(importedFilePath, "utf8");
 
     const sourceFile = ts.createSourceFile(
@@ -119,6 +136,8 @@ function parseNamedImports(importDeclaration) {
 
 const importDeclarations = worksheetAst.statements.filter(ts.isImportDeclaration);
 
+console.log(`Found ${importDeclarations.length} import statement(s).`);
+
 const constBlocks = [];
 const functionBlocks = [];
 const importRanges = [];
@@ -134,13 +153,17 @@ for (const importDeclaration of importDeclarations) {
     const importedFilePath = path.resolve(worksheetDir, importPath);
     const importedNames = parseNamedImports(importDeclaration);
 
+    console.log(`Resolving import: ${importPath}`);
+
     for (const importedName of importedNames) {
         const block = extractExportedMember(importedFilePath, importedName);
 
         if (block.type === "const") {
             constBlocks.push(block.text);
+            console.log(`  Expanded const: ${importedName}`);
         } else if (block.type === "function") {
             functionBlocks.push(block.text);
+            console.log(`  Expanded function: ${importedName}`);
         }
     }
 
