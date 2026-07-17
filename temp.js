@@ -1,196 +1,22 @@
 const fs = require("fs");
 const path = require("path");
-const ts = require("typescript");
 
-const worksheetPathArg = process.argv[2];
+const inputFolder = "./markdown";
+const outputFile = "./merged.md";
 
-if (!worksheetPathArg) {
-    console.error("Usage: node scripts/build.js <worksheet-js-path>");
-    process.exit(1);
+const files = fs.readdirSync(inputFolder)
+    .filter(f => f.endsWith(".md"))
+    .sort();
+
+let output = "";
+
+for (const file of files) {
+    console.log(`Merging ${file}`);
+
+    output += `\n\n<!-- ${file} -->\n\n`;
+    output += fs.readFileSync(path.join(inputFolder, file), "utf8");
 }
 
-const worksheetPath = path.resolve(worksheetPathArg);
+fs.writeFileSync(outputFile, output);
 
-if (!fs.existsSync(worksheetPath)) {
-    console.error(`File not found: ${worksheetPath}`);
-    process.exit(1);
-}
-
-if (path.basename(worksheetPath).toLowerCase() !== "worksheet.js") {
-    console.error("The selected file must be named 'worksheet.js'.");
-    process.exit(1);
-}
-
-const worksheetDir = path.dirname(worksheetPath);
-const worksheetFileName = path.basename(worksheetPath, ".js");
-const outputPath = path.join(worksheetDir, `${worksheetFileName}.bundle.js`);
-
-console.log(`Building: ${worksheetPath}`);
-
-const worksheetSource = fs.readFileSync(worksheetPath, "utf8");
-
-const worksheetAst = ts.createSourceFile(
-    worksheetPath,
-    worksheetSource,
-    ts.ScriptTarget.Latest,
-    true,
-    ts.ScriptKind.JS
-);
-
-function getStatementTextWithoutExport(sourceText, sourceFile, statement) {
-    const start = statement.getFullStart();
-    const end = statement.end;
-    const originalText = sourceText.substring(start, end);
-
-    if (!statement.modifiers) {
-        return originalText.trimStart();
-    }
-
-    const exportModifier = statement.modifiers.find(
-        modifier => modifier.kind === ts.SyntaxKind.ExportKeyword
-    );
-
-    if (!exportModifier) {
-        return originalText.trimStart();
-    }
-
-    const exportStart = exportModifier.getStart(sourceFile) - start;
-    const exportEnd = exportModifier.end - start;
-
-    return (
-        originalText.substring(0, exportStart) +
-        originalText.substring(exportEnd).trimStart()
-    ).trimStart();
-}
-
-function getExportedStatementInfo(statement) {
-    if (ts.isFunctionDeclaration(statement) && statement.name) {
-        return {
-            name: statement.name.text,
-            type: "function"
-        };
-    }
-
-    if (ts.isVariableStatement(statement)) {
-        if (statement.declarationList.declarations.length !== 1) {
-            return null;
-        }
-
-        const declaration = statement.declarationList.declarations[0];
-
-        if (ts.isIdentifier(declaration.name)) {
-            return {
-                name: declaration.name.text,
-                type: "const"
-            };
-        }
-    }
-
-    return null;
-}
-
-function extractExportedMember(importedFilePath, memberName) {
-    if (!fs.existsSync(importedFilePath)) {
-        throw new Error(`Imported file not found: ${importedFilePath}`);
-    }
-
-    const sourceText = fs.readFileSync(importedFilePath, "utf8");
-
-    const sourceFile = ts.createSourceFile(
-        importedFilePath,
-        sourceText,
-        ts.ScriptTarget.Latest,
-        true,
-        ts.ScriptKind.JS
-    );
-
-    for (const statement of sourceFile.statements) {
-        const statementInfo = getExportedStatementInfo(statement);
-
-        if (!statementInfo || statementInfo.name !== memberName) {
-            continue;
-        }
-
-        return {
-            type: statementInfo.type,
-            text: getStatementTextWithoutExport(sourceText, sourceFile, statement)
-        };
-    }
-
-    throw new Error(`Cannot find exported member "${memberName}" in ${importedFilePath}`);
-}
-
-function parseNamedImports(importDeclaration) {
-    const importClause = importDeclaration.importClause;
-
-    if (!importClause || !importClause.namedBindings) {
-        return [];
-    }
-
-    if (!ts.isNamedImports(importClause.namedBindings)) {
-        throw new Error("Only named imports are supported.");
-    }
-
-    return importClause.namedBindings.elements.map(element => element.name.text);
-}
-
-const importDeclarations = worksheetAst.statements.filter(ts.isImportDeclaration);
-
-console.log(`Found ${importDeclarations.length} import statement(s).`);
-
-const constBlocks = [];
-const functionBlocks = [];
-const importRanges = [];
-
-for (const importDeclaration of importDeclarations) {
-    const moduleSpecifier = importDeclaration.moduleSpecifier;
-
-    if (!ts.isStringLiteral(moduleSpecifier)) {
-        continue;
-    }
-
-    const importPath = moduleSpecifier.text;
-    const importedFilePath = path.resolve(worksheetDir, importPath);
-    const importedNames = parseNamedImports(importDeclaration);
-
-    console.log(`Resolving import: ${importPath}`);
-
-    for (const importedName of importedNames) {
-        const block = extractExportedMember(importedFilePath, importedName);
-
-        if (block.type === "const") {
-            constBlocks.push(block.text);
-            console.log(`  Expanded const: ${importedName}`);
-        } else if (block.type === "function") {
-            functionBlocks.push(block.text);
-            console.log(`  Expanded function: ${importedName}`);
-        }
-    }
-
-    importRanges.push({
-        start: importDeclaration.getFullStart(),
-        end: importDeclaration.end
-    });
-}
-
-let worksheetWithoutImports = worksheetSource;
-
-for (const range of importRanges.sort((a, b) => b.start - a.start)) {
-    worksheetWithoutImports =
-        worksheetWithoutImports.substring(0, range.start) +
-        worksheetWithoutImports.substring(range.end);
-}
-
-const expandedSource = [
-    ...constBlocks,
-    ...functionBlocks
-].join("\n\n");
-
-const outputSource =
-    expandedSource +
-    "\n\n" +
-    worksheetWithoutImports.trimStart();
-
-fs.writeFileSync(outputPath, outputSource, "utf8");
-
-console.log(`Generated: ${outputPath}`);
+console.log("Done!");
